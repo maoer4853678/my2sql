@@ -1,14 +1,161 @@
 #coding=utf-8
 import pandas as pd
-from sqlalchemy import create_engine
 import MySQLdb,sqlite3,psycopg2
+import numpy as np
+import cx_Oracle
+import os
+os.environ['NLS_LANG'] = 'SIMPLIFIED CHINESE_CHINA.UTF8'
 
-class Mysql():
-    def __init__(self,engine,sqlite = None,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+#class dbobj()
+
+class oracle_obj():
+    actions = {"add":"ADD ","del":"drop column ","update":" modify  "}
+    
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+        self.conn=cx_Oracle.connect('%s/%s@%s/%s'%(user,password,host,dbname))
+        
+    def list_table(self):
+        sql = 'select table_name from user_tables'
+        return sql
+    
+    def show_schema(self,tablename):
+        sql = "select COLUMN_NAME,DATA_TYPE,DATA_LENGTH from user_tab_cols where table_name='%s'"%(tablename.upper())
+        columns = ['Field','Type','Null']
+        return sql,columns
+        
+    def alter_table(self,tablename,action,col):
+        sql ='alter table %s ' %tablename.upper()
+        if action=="del":
+            sql += ','.join(map(lambda i:"%s %s "%(self.actions[action],i),col.keys()))
+        else:
+            for i in col.items():
+                sql +=" %s %s %s"%(self.actions[action],i[0],i[1])
+        return sql
+
+    def colcom(self,g):
+        return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"   
+      
+    def insert_df(self,tablename, df,columns):
+        sql = '''into %s (%s) values %s '''
+        df1 = df.apply(lambda x:sql%(tablename,','.join(columns),\
+                                     str(tuple(x.values.tolist()))),axis=1)
+        sql1 = 'insert all '+ ' \n '.join(df1.values)+"\nselect 1 from dual "
+        return sql1
+        
+
+class postgre_obj():
+    actions = {"add":"ADD ","del":"DROP COLUMN ","update":" ALTER "}
+    
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+        self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname)
+    
+    def list_table(self):
+        sql = "select tablename from pg_tables where schemaname='public'"
+        return sql
+        
+    def show_schema(self,tablename):
+        sql = '''SELECT col_description(a.attrelid,a.attnum) as comment,format_type(a.atttypid,a.atttypmod)
+                        as type,a.attname as name, a.attnotnull as notnull FROM pg_class as c,pg_attribute as a 
+                    where c.relname = '%s' and a.attrelid = c.oid and a.attnum>0  '''%(tablename.lower())
+        columns = ['Null','Type',"Field",'Key']
+        return sql,columns
+    
+    def alter_table(self,tablename,action,col):
+        sql = 'alter table %s ' %tablename
+        if action=="del":
+            sql += ','.join(map(lambda i:"%s %s "%(self.actions[action],i),col.keys()))
+        if action=="add":
+            sql += ','.join(map(lambda i:"%s %s %s"%(self.actions[action],i[0],i[1]),col.items()))
+        if action=="update":
+            sql += ','.join(map(lambda i:"%s %s type %s using %s::%s"%(self.actions[action],i[0],i[1],i[0],i[1]),col.items()))
+        return sql
+        
+    def colcom(self,g):
+        return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"   
+   
+    def insert_df(self,tablename, df,columns):
+        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
+        col1 = ','.join(df.apply(self.colcom,axis = 1))
+        sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
+        return sql
+        
+        
+class mysql_obj():
+    actions = {"add":"ADD ","del":"DROP COLUMN ","update":' modify column'}
+    
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+        self.conn = MySQLdb.connect(host,user,password,dbname)
+
+    def list_table(self):
+        sql = "show tables"
+        return sql 
+        
+    def show_schema(self,tablename):
+        sql = "desc %s"%(tablename.lower())
+        columns = ['Field','Type','Null','Key','Default','Extra']
+        return sql,columns
+    
+    def alter_table(self,tablename,action,col):
+        sql = 'alter table %s ' %tablename
+        if action=="del":
+            sql += ','.join(map(lambda i:"%s %s "%(self.actions[action],i),col.keys()))
+        else:
+            sql += ','.join(map(lambda i:"%s %s %s"%(self.actions[action],i[0],i[1]),col.items()))
+        return sql
+    
+    def colcom(self,g):
+        return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"    
+    
+    def insert_df(self,tablename, df,columns):
+        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
+        col1 = ','.join(df.apply(self.colcom,axis = 1))
+        sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
+        return sql
+    
+        
+class sqlite_obj():
+    actions = {"add":"ADD "}
+    
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+        if dbname=='memory' or dbname=='':
+            self.conn = sqlite3.connect(':memory:')
+        else:
+            if '.db' not in dbname and '.sqlite' not in dbname:
+                dbname = dbname+'.db'
+            self.conn = sqlite3.connect(dbname)
+            
+    def list_table(self):
+        sql = "SELECT name FROM sqlite_master WHERE type='table' order by name"
+        return sql 
+        
+    def show_schema(self,tablename):
+        sql = "PRAGMA table_info(%s)"%(tablename.lower())
+        columns = ['Id','Field','Type','Extra','Null','Key']
+        return sql,columns      
+    
+    def alter_table(self,tablename,action,col):
+        for i in col.items():
+            sql ='alter table %s ' %tablename+"%s %s %s"%(self.actions[action],i[0],i[1])
+        return sql
+
+    def colcom(self,g):
+        return ' UNION ALL SELECT '+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))
+         
+    def insert_df(self,tablename, df,columns):
+        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))
+        col1 = ''.join(df.apply(self.colcom,axis = 1))
+        col1 = col1.replace("UNION ALL SELECT",'SELECT',1)
+        sql = "INSERT INTO %s (%s) %s;" % (tablename,col,col1)
+        return sql
+        
+
+class Mysql_obj():
+    def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
         u'''
         初始化Mysql类, 支持 Mysql，Postgresql 和Sqlite3 引擎
         engine :数据库引擎
             mysql : Mysql数据库
+            oracle : Oracle数据库
             postgresql : Postgresql数据库
             sqlite : Sqlite 轻量级数据库 本地文件/内存
             
@@ -18,35 +165,53 @@ class Mysql():
         password :密码
         host :数据库地址  
         '''
-        engins = {"m":"mysql","mysql":"mysql"}
-        engins1 = {"postgresql":"postgresql","postgre":"postgresql","p":"postgresql"}
-        self.perkey = {}
-        if engine in engins.keys():
-            self.engine = create_engine('%s://%s:%s@%s/%s?charset=utf8'%(engins[engine],user,password,host,dbname))
-            self.enginetype = 'm'
-            self.conn = MySQLdb.connect(host,user,password,dbname)
-        elif engine in engins1.keys():
-            self.engine = create_engine('%s://%s:%s@%s/%s?charset=utf8'%(engins1[engine],user,password,host,dbname))
-            self.enginetype = 'p'
-            self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname)
-        elif engine == 'sqlite' or engine == 's' :
-            self.enginetype = 's'
-            if not sqlite:
-                self.engine = create_engine('sqlite:///:memory:')
-                self.conn = sqlite3.connect(':memory:')
-            else:
-                self.engine = create_engine('sqlite:////%s'%sqlite)
-                self.conn = sqlite3.connect(sqlite)
+        self.perkey ={}
+        engins = {"m":"m","mysql":"m","postgresql":"p","postgre":"p","p":"p","sqlite":'s',"s":"s",'o':"o",'oracle':"o"}
+        objs = {"o": oracle_obj,"p":postgre_obj,"m":mysql_obj,"s":sqlite_obj}
+        if engine.lower() in engins:
+            self.enginetype = engins[engine.lower()]
+            self.obj = objs[self.enginetype](dbname,user,password,host)
+            self.cur = self.obj.conn.cursor()
+            try:
+                self.conn.set_client_encoding('UTF8')
+            except:
+                pass
         else:
             print (u'初始化失败 未能找到相应数据库引擎，请输入 help(Mysql) 进行查询')
-
-        self.cur = self.conn.cursor()
+    
+    def exec_(self,sql):
+        u'''
+        执行sql语句
+        sql : sql语句 [字符串]
+        '''
         try:
-            self.conn.set_client_encoding('UTF8')
-        except:
-            pass
+            self.cur.execute(sql)
+            rows = self.cur.fetchall()
+            self.obj.conn.commit()
+            return rows
+        
+        except Exception as e:
+            print (u'SQL语句执行失败: ',e)
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
 
-    def creat_table(self,tablename,col,perkey = None,foreign = None,auto = False,default = {}):
+    def list_table(self):
+        u'''
+        获取数据表列表
+        '''
+        try:
+            sql = self.obj.list_table()
+            self.cur.execute(sql)
+            rows = [i[0] for i in self.cur.fetchall()]
+            return rows
+            
+        except Exception as e:
+            print (u'数据表创建失败: ',e)
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
+            
+
+    def creat_table(self,tablename,col,perkey = None,default = {}):
         u'''
         创建数据表
         tablename : 数据表名称 [字符串]
@@ -68,31 +233,22 @@ class Mysql():
                     Psql = ',PRIMARY KEY (%s)' % (perkey)
                 else:
                     Psql =''
-                if foreign!= None:           
-                    Fsql = ","+",".join(map(lambda i:"foreign key(%s) references %s"%(i[0],i[1]),foreign.items()))
-                else:
-                    Fsql = ''
-                if auto and perkey!= None:
-                    if self.enginetype == "p":
-                        col[perkey] = " SERIAL"
-                    else:
-                        col[perkey] =  col[perkey]+ ' AUTO_INCREMENT'
-
-                defs = {'m':" default '%s'",'s':" default('%s')",'p':" default('%s')"}
+                defs = {'m':" default '%s'",'s':" default('%s')",'p':" default('%s')",'o':" default(%s)"} 
                 for key in default.keys():
                     col[key] = col[key]+ defs[self.enginetype]%default[key]
-
+                       
                 sql = ','.join(map(lambda i:"%s %s"%(i[0],i[1]),col.items()))
-                creat_sql = '''CREATE TABLE %s (%s%s%s) ;''' % (tablename,sql,Psql,Fsql)
-                self.cur.execute(creat_sql)
-                self.conn.commit()
+                sql = '''CREATE TABLE %s (%s%s) ''' % (tablename,sql,Psql)
+                self.cur.execute(sql)
+                self.obj.conn.commit()
                 print (u'数据表创建成功')
                 self.perkey[tablename] = perkey
-            except Exception,e:
+            except Exception as e:
                 print (u'数据表创建失败: ',e)
-                self.conn.rollback()
-            
-
+                print ("Error : ",sql)
+                self.obj.conn.rollback()
+                
+                
     def delete_table(self,tablename,kind=0):
         u'''
         删除数据表
@@ -103,58 +259,33 @@ class Mysql():
         '''
         try:
             k = 'DROP' if kind==0 else "truncate"
-            sql = '%s TABLE %s ;' % (k,tablename)
+            sql = '%s TABLE %s ' % (k,tablename)
             self.cur.execute(sql)
-            self.conn.commit()
+            self.obj.conn.commit()
             print (u'删除表成功')
-        except Exception,e:
+        except Exception as e:
             print (u'删除表创建失败: ',e)
-            self.conn.rollback()
-
-    def list_table(self):
-        u'''
-        获取数据表列表
-        '''
-        lists = {"m":"show tables","p":"select tablename from pg_tables where schemaname='public'","s":"SELECT name FROM sqlite_master WHERE type='table' order by name"}
-        self.cur.execute(lists[self.enginetype])
-        rows = [i[0] for i in self.cur.fetchall()  ]
-        return rows
-        
-    def exec_(self,sql):
-        u'''
-        执行sql语句
-        sql : sql语句 [字符串]
-        '''
-        try:
-            self.cur.execute(sql)
-            rows = self.cur.fetchall()
-            self.conn.commit()
-            return rows
-        except Exception,e:
-            print (u'SQL语句执行失败: ',e)
-            self.conn.rollback()
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
             
     def show_schema(self,tablename):
         u'''
         获取数据表字段配置
         tablename : 数据表名称 [字符串]
         '''
-        lists = {"m":{"sql":"desc %s","columns":['Field','Type','Null','Key','Default','Extra']},\
-                 "p":{"sql":'''SELECT col_description(a.attrelid,a.attnum) as comment,format_type(a.atttypid,a.atttypmod)
-                        as type,a.attname as name, a.attnotnull as notnull FROM pg_class as c,pg_attribute as a 
-                    where c.relname = '%s' and a.attrelid = c.oid and a.attnum>0  ''',"columns":['Null','Type',"Field",'Key']},\
-                 "s":{"sql":"PRAGMA table_info(%s)","columns":['Id','Field','Type','Extra','Null','Key']}
-                 }
         try:
-            self.cur.execute(lists[self.enginetype]["sql"]%(tablename.lower()))
+            sql,columns= self.obj.show_schema(tablename)
+            self.cur.execute(sql)
             rows = self.cur.fetchall()
-            df = pd.DataFrame(list(rows),columns = lists[self.enginetype]["columns"])
+            df = pd.DataFrame(list(rows),columns = columns)
             df = df[df['Type']!='-']
             return df
-        except Exception,e:
+        except Exception as e:
             print (u'获取表结构失败: ',e)
-            self.conn.rollback()
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
 
+            
     def alter_table(self,tablename,action,col ={} ):
         u'''
         修改表结构
@@ -165,52 +296,18 @@ class Mysql():
             update : 为表修改字段类型
         col : 字段配置表 [字典]  key为字段名称，value是 类型 ，若action为del ，value可为空
         '''
-        
-        sql = 'alter table %s ' %tablename
-        actions = {"add":"ADD ","del":"DROP COLUMN ","update":" ALTER "}
-        bz = True
-        if action in actions:
+        if action in self.obj.actions:
             try:
-                if self.enginetype=='s':
-                    if action=="add":
-                        for i in col.items():
-                            sql ='alter table %s ' %tablename+"%s %s %s"%(actions[action],i[0],i[1])
-                            self.cur.execute(sql)
-                    else:
-                        bz =False
-                        print u'修改表结构失败 : sqlite 数据库暂不支持该操作'
-                
-                if self.enginetype=='p':
-                    if action=="del":
-                        sql += ','.join(map(lambda i:"%s %s "%(actions[action],i),col.keys()))
-                    if action=="add":
-                        sql += ','.join(map(lambda i:"%s %s %s"%(actions[action],i[0],i[1]),col.items()))
-                    if action=="update":
-                        sql += ','.join(map(lambda i:"%s %s type %s using %s::%s"%(actions[action],i[0],i[1],i[0],i[1]),col.items()))
-                    self.cur.execute(sql)
-                    
-                if self.enginetype=='m':
-                    actions["update"] = ' modify column'
-                    if action=="del":
-                        sql += ','.join(map(lambda i:"%s %s "%(actions[action],i),col.keys()))
-                    else:
-                        sql += ','.join(map(lambda i:"%s %s %s"%(actions[action],i[0],i[1]),col.items()))
-                    self.cur.execute(sql)
-                      
-                self.conn.commit()
-                msg=  u'修改表结构成功' if bz else u'修改表结构失败'
-                print (msg)
-            except Exception,e:
+                sql = self.obj.alter_table(tablename,action,col)
+                self.cur.execute(sql)
+                self.obj.conn.commit()
+                print (u'修改表结构成功')
+            except Exception as e:
                 print (u'修改表结构失败: ',e)
-                self.conn.rollback()            
+                print ("Error : ",sql)
+                self.obj.conn.rollback()            
         else:
-           print u'修改表结构失败: 执行动作不存在'
-
-    def colcom(self,g):
-        if self.enginetype != 's':
-            return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"
-        else:
-            return ' UNION ALL SELECT '+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))
+           print (u'修改表结构失败: 执行动作不存在')
            
     def insert_df(self,tablename,df):
         u'''
@@ -242,24 +339,17 @@ class Mysql():
 
             if bz:
                 ## sqlite 批量插入只支持一次 500条数据
-                col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))
-                if self.enginetype=='s':
-                    col1 = ''.join(df.apply(self.colcom,axis = 1))
-                    col1 = col1.replace("UNION ALL SELECT",'SELECT',1)
-                    sql = "INSERT INTO %s (%s) %s;" % (tablename,col,col1)
-                else:
-                    col1 = ','.join(df.apply(self.colcom,axis = 1))
-                    sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
-                    
+                sql = self.obj.insert_df(tablename,df,columns) 
                 self.cur.execute(sql)
-                self.conn.commit()
+                self.obj.conn.commit()
                 print (u'插入数据表成功 %d行 ' % (len(df)))
             else:
                 print (u'插入数据失败，输入的列表长度和数据表结构不符')
-        
-        except Exception,e:
+
+        except Exception as e:
             print (u'插入数据失败: ',e)
-            self.conn.rollback()
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
         u'''
@@ -281,42 +371,22 @@ class Mysql():
         try:
             if type(columns) == type([]):
                 columns = ','.join(columns)
-            select_sql = 'select %s from %s '% (columns,tablename)
+            sql = 'select %s from %s '% (columns,tablename)
             if condition!="":
                 if "where" not in condition.lower() :
                     condition = "WHERE "+condition
-                select_sql = select_sql+ " "+condition    
+                sql += " "+condition    
             if count>=0:
-                select_sql = select_sql+" LIMIT %d"%count
-            df = pd.read_sql_query(select_sql,self.conn)
-            self.conn.commit()
+                sql += " LIMIT %d"%count
+            df = pd.read_sql_query(sql,self.obj.conn)
+            self.obj.conn.commit()
             return df
             
-        except Exception,e:
+        except Exception as e:
             print (u'获取数据失败: ',e)
-            self.conn.rollback()     
-        
-    
-    def delete_data(self,tablename,condition):
-        u'''
-        删除数据
-        tablename : 数据表名称 [字符串]
-        condition : 删除条件 [字典] key为删除条件的字段名称，value是删除条件的字段的值 (=)
-              各键直接是与的关系
-        '''
-        sql = ' and '.join(["%s = '%s'" for i in range(len(condition.keys()))])
-        sql = '''delete from %s where %s'''% (tablename,sql)
-        tmp = []
-        [tmp.extend(i) for i in condition.items()]
-        delete_sql = sql % tuple(tmp)
-        try:
-            self.cur.execute(delete_sql)
-            self.conn.commit()
-            print (u'删除数据成功' )
-        except Exception,e:
-            print (u'删除数据失败: ' ,e)
-            self.conn.rollback()
-
+            print ("Error : ",sql)
+            self.obj.conn.rollback()     
+            
     def update_data(self,tablename,data,condition):
         u'''
         更新数据
@@ -326,6 +396,7 @@ class Mysql():
               各键直接是与的关系
         '''
         chemainit = self.show_schema(tablename)
+        chemainit['Field'] = chemainit['Field'].str.lower()
         chemainit = dict(zip(chemainit['Field'],chemainit['Type']))
         col = []
         for i in range(len(data.keys())):
@@ -347,15 +418,16 @@ class Mysql():
         tmp = []
         [tmp.extend(i) for i in data.items()]
         [tmp.extend(i) for i in condition.items()]
-        updata_sql = sql % tuple(tmp)
+        sql = sql % tuple(tmp)
         try:
-            self.cur.execute(updata_sql)
-            self.conn.commit()
+            self.cur.execute(sql)
+            self.obj.conn.commit()
             print (u'更新数据成功' )
-        except Exception,e:
+        except Exception as e:
             print (u'更新数据失败: ',e)
-            self.conn.rollback()
-
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
+            
     def creat_key(self,tablename,perkey=[],foreign ={}):
         u'''
         创建主键/外键
@@ -377,22 +449,24 @@ class Mysql():
                 sql = 'alter table %s add primary key(%s)' %(tablename,perkey)
                 try:
                     self.cur.execute(sql)
-                    self.conn.commit()
+                    self.obj.conn.commit()
                     print (u'创建主键成功')
-                except Exception,e:
+                except Exception as e:
                     print (u'创建主键失败: ',e)
-                    self.conn.rollback()
+                    print ("Error : ",sql)
+                    self.obj.conn.rollback()
                     
             if len(foreign)!=0:
                 try:
                     for key in foreign:
                         sql = 'alter table %s add foreign key (%s) references %s' %(tablename,key,foreign[key])
                         self.cur.execute(sql)
-                    self.conn.commit()
+                    self.obj.conn.commit()
                     print (u'创建外键成功')
-                except Exception,e:
+                except Exception as e:
                     print (u'创建外键失败: ',e)
-                    self.conn.rollback()
+                    print ("Error : ",sql)
+                    self.obj.conn.rollback()
                     
     def get_count(self,tablename):
         u'''
@@ -404,8 +478,15 @@ class Mysql():
             self.cur.execute(sql)
             rows = self.cur.fetchone()
             return rows[0]
-        except Exception,e:
+        except Exception as e:
             print (u'获取表行数失败: ',e)
-            self.conn.rollback()
-     
-
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
+        
+    def close(self):
+        u'''关闭数据库'''
+        self.obj.conn.close()
+        
+        
+        
+        
