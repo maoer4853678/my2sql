@@ -178,38 +178,34 @@ class Mysql_obj():
                 pass
         else:
             print (u'初始化失败 未能找到相应数据库引擎，请输入 help(Mysql) 进行查询')
+
+    def execute(self,sql,msg=u'SQL语句执行成功',error=u'SQL语句执行失败: '):
+        try:
+            self.cur.execute(sql)
+            self.obj.conn.commit()
+            print (msg)
+        except Exception as e:
+            print (error,e)
+            print ("Error : ",sql)
+            self.obj.conn.rollback()
     
     def exec_(self,sql):
         u'''
         执行sql语句
         sql : sql语句 [字符串]
         '''
-        try:
-            self.cur.execute(sql)
-            rows = self.cur.fetchall()
-            self.obj.conn.commit()
-            return rows
-        
-        except Exception as e:
-            print (u'SQL语句执行失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
+        self.execute(sql,u'SQL语句执行成功',u'SQL语句执行失败: ')
+        rows = self.cur.fetchall()
+        return rows  
 
     def list_table(self):
         u'''
         获取数据表列表
         '''
-        try:
-            sql = self.obj.list_table()
-            self.cur.execute(sql)
-            rows = [i[0] for i in self.cur.fetchall()]
-            return rows
-            
-        except Exception as e:
-            print (u'数据表创建失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
-            
+        sql = self.obj.list_table()
+        self.execute(sql,u'获取数据表成功',u'获取数据表失败: ')
+        rows = [i[0] for i in self.cur.fetchall()]
+        return rows     
 
     def creat_table(self,tablename,col,perkey = None,default = {}):
         u'''
@@ -226,29 +222,20 @@ class Mysql_obj():
         if tablename in self.list_table():
             print (u'数据表创建失败: %s已存在'%(tablename))
         else:
-            try:
-                if perkey!= None:
-                    if type(perkey)==type([]):
-                        perkey = ','.join(perkey)
-                    Psql = ',PRIMARY KEY (%s)' % (perkey)
-                else:
-                    Psql =''
-                defs = {'m':" default '%s'",'s':" default('%s')",'p':" default('%s')",'o':" default(%s)"} 
-                for key in default.keys():
-                    col[key] = col[key]+ defs[self.enginetype]%default[key]
-                       
-                sql = ','.join(map(lambda i:"%s %s"%(i[0],i[1]),col.items()))
-                sql = '''CREATE TABLE %s (%s%s) ''' % (tablename,sql,Psql)
-                self.cur.execute(sql)
-                self.obj.conn.commit()
-                print (u'数据表创建成功')
-                self.perkey[tablename] = perkey
-            except Exception as e:
-                print (u'数据表创建失败: ',e)
-                print ("Error : ",sql)
-                self.obj.conn.rollback()
-                
-                
+            if perkey!= None:
+                if type(perkey)==type([]):
+                    perkey = ','.join(perkey)
+                Psql = ',PRIMARY KEY (%s)' % (perkey)
+            else:
+                Psql =''
+            defs = {'m':" default '%s'",'s':" default('%s')",'p':" default('%s')",'o':" default(%s)"} 
+            for key in default.keys():
+                col[key] = col[key]+ defs[self.enginetype]%default[key]
+                   
+            sql = ','.join(map(lambda i:"%s %s"%(i[0],i[1]),col.items()))
+            sql = '''CREATE TABLE %s (%s%s) ''' % (tablename,sql,Psql)
+            self.execute(sql,u'数据表创建成功',u'数据表创建失败: ')
+
     def delete_table(self,tablename,kind=0):
         u'''
         删除数据表
@@ -257,35 +244,22 @@ class Mysql_obj():
             0 : 即删除数据表，
             1 : 则保留表结构，清空数据
         '''
-        try:
-            k = 'DROP' if kind==0 else "truncate"
-            sql = '%s TABLE %s ' % (k,tablename)
-            self.cur.execute(sql)
-            self.obj.conn.commit()
-            print (u'删除表成功')
-        except Exception as e:
-            print (u'删除表创建失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
+        k = 'DROP' if kind==0 else "truncate"
+        sql = '%s TABLE %s ' % (k,tablename)
+        self.execute(sql,u'删除表成功',u'删除表创建失败: ')
             
     def show_schema(self,tablename):
         u'''
         获取数据表字段配置
         tablename : 数据表名称 [字符串]
         '''
-        try:
-            sql,columns= self.obj.show_schema(tablename)
-            self.cur.execute(sql)
-            rows = self.cur.fetchall()
-            df = pd.DataFrame(list(rows),columns = columns)
-            df = df[df['Type']!='-']
-            return df
-        except Exception as e:
-            print (u'获取表结构失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
-
-            
+        sql,columns= self.obj.show_schema(tablename)
+        self.execute(sql,u'获取表结构成功',u'获取表结构失败: ')
+        rows = self.cur.fetchall()
+        df = pd.DataFrame(list(rows),columns = columns)
+        df = df[df['Type']!='-']
+        return df
+           
     def alter_table(self,tablename,action,col ={} ):
         u'''
         修改表结构
@@ -297,15 +271,8 @@ class Mysql_obj():
         col : 字段配置表 [字典]  key为字段名称，value是 类型 ，若action为del ，value可为空
         '''
         if action in self.obj.actions:
-            try:
-                sql = self.obj.alter_table(tablename,action,col)
-                self.cur.execute(sql)
-                self.obj.conn.commit()
-                print (u'修改表结构成功')
-            except Exception as e:
-                print (u'修改表结构失败: ',e)
-                print ("Error : ",sql)
-                self.obj.conn.rollback()            
+            sql = self.obj.alter_table(tablename,action,col)
+            self.execute(sql,u'修改表结构成功',u'修改表结构失败: ')     
         else:
            print (u'修改表结构失败: 执行动作不存在')
            
@@ -319,37 +286,27 @@ class Mysql_obj():
             [[]]: 要插入的数据[[]]，df的列数需与数据表的字段个数一致
             []: 要插入的数据[]，df的长度需与数据表的字段个数一致
         '''
-        try:
-            bz =True
-            if type(df) == type([]):
-                columns = self.show_schema(tablename)["Field"].tolist()
-                if type(df[0]) == type([]):
-                    bz= (len(columns)==len(df[0]))
-                    df = pd.DataFrame(df,columns = columns)
-                else:
-                    bz= (len(columns)==len(df))
-                    df = pd.Series(df,index = columns).to_frame().T
-                
-            elif type(df) == type(pd.Series()):
-                columns = df.index.tolist()
-                df = df.to_frame().T
-                
-            elif type(df) == type(pd.DataFrame()):
-                columns = df.columns.tolist()
+        bz =True
+        if type(df) == type([]):
+            columns = self.show_schema(tablename)["Field"].tolist()
+            if type(df[0]) == type([]):
+                bz= (len(columns)==len(df[0]))
+                df = pd.DataFrame(df,columns = columns)
+            else:
+                bz= (len(columns)==len(df))
+                df = pd.Series(df,index = columns).to_frame().T
+            
+        elif type(df) == type(pd.Series()):
+            columns = df.index.tolist()
+            df = df.to_frame().T
+            
+        elif type(df) == type(pd.DataFrame()):
+            columns = df.columns.tolist()
 
             if bz:
                 ## sqlite 批量插入只支持一次 500条数据
-                sql = self.obj.insert_df(tablename,df,columns) 
-                self.cur.execute(sql)
-                self.obj.conn.commit()
-                print (u'插入数据表成功 %d行 ' % (len(df)))
-            else:
-                print (u'插入数据失败，输入的列表长度和数据表结构不符')
-
-        except Exception as e:
-            print (u'插入数据失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
+                sql = self.obj.insert_df(tablename,df,columns)
+                self.execute(sql,u'插入数据表成功 %d行 ' % (len(df)),u'插入数据失败: ')
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
         u'''
@@ -368,24 +325,21 @@ class Mysql_obj():
             [[]]: 要插入的数据[[]]，df的列数需与数据表的字段个数一致
             []: 要插入的数据[]，df的长度需与数据表的字段个数一致
         '''
-        try:
-            if type(columns) == type([]):
-                columns = ','.join(columns)
-            sql = 'select %s from %s '% (columns,tablename)
-            if condition!="":
-                if "where" not in condition.lower() :
-                    condition = "WHERE "+condition
-                sql += " "+condition    
-            if count>=0:
-                sql += " LIMIT %d"%count
-            df = pd.read_sql_query(sql,self.obj.conn)
-            self.obj.conn.commit()
-            return df
-            
-        except Exception as e:
-            print (u'获取数据失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()     
+        if type(columns) == type([]):
+            columns = ','.join(columns)
+        sql = 'select %s from %s '% (columns,tablename)
+        if condition!="":
+            if "where" not in condition.lower() :
+                condition = "WHERE "+condition
+            sql += " "+condition    
+        if count>=0:
+            sql += " LIMIT %d"%count
+
+        self.execute(sql,u'获取数据成功',u'获取数据失败: ')
+        rows = self.cur.fetchall()
+        columns = self.show_schema(tablename)['Field']
+        df = pd.DataFrame(list(rows),columns = columns) ##  pd.read_sql_query(sql,self.obj.conn)
+        return df
             
     def update_data(self,tablename,data,condition):
         u'''
@@ -419,14 +373,7 @@ class Mysql_obj():
         [tmp.extend(i) for i in data.items()]
         [tmp.extend(i) for i in condition.items()]
         sql = sql % tuple(tmp)
-        try:
-            self.cur.execute(sql)
-            self.obj.conn.commit()
-            print (u'更新数据成功' )
-        except Exception as e:
-            print (u'更新数据失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
+        self.execute(sql,u'更新数据成功',u'更新数据失败: ')
             
     def creat_key(self,tablename,perkey=[],foreign ={}):
         u'''
@@ -447,26 +394,12 @@ class Mysql_obj():
                 if type(perkey)==type([]):
                     perkey = ','.join(perkey)
                 sql = 'alter table %s add primary key(%s)' %(tablename,perkey)
-                try:
-                    self.cur.execute(sql)
-                    self.obj.conn.commit()
-                    print (u'创建主键成功')
-                except Exception as e:
-                    print (u'创建主键失败: ',e)
-                    print ("Error : ",sql)
-                    self.obj.conn.rollback()
+                self.execute(sql,u'创建主键成功',u'创建主键失败: ')
                     
             if len(foreign)!=0:
-                try:
-                    for key in foreign:
-                        sql = 'alter table %s add foreign key (%s) references %s' %(tablename,key,foreign[key])
-                        self.cur.execute(sql)
-                    self.obj.conn.commit()
-                    print (u'创建外键成功')
-                except Exception as e:
-                    print (u'创建外键失败: ',e)
-                    print ("Error : ",sql)
-                    self.obj.conn.rollback()
+                for key in foreign:
+                    sql = 'alter table %s add foreign key (%s) references %s' %(tablename,key,foreign[key])
+                self.execute(sql,u'创建外键成功',u'创建外键失败: ')
                     
     def get_count(self,tablename):
         u'''
@@ -474,14 +407,9 @@ class Mysql_obj():
         tablename : 数据表名称 [字符串]
         '''
         sql ='select count(*) from %s'%tablename
-        try:
-            self.cur.execute(sql)
-            rows = self.cur.fetchone()
-            return rows[0]
-        except Exception as e:
-            print (u'获取表行数失败: ',e)
-            print ("Error : ",sql)
-            self.obj.conn.rollback()
+        self.execute(sql,u'获取表行数成功',u'获取表行数失败: ')
+        rows = self.cur.fetchone()
+        return rows[0]
         
     def close(self):
         u'''关闭数据库'''
