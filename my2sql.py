@@ -1,12 +1,28 @@
 #coding=utf-8
 import pandas as pd
-import MySQLdb,sqlite3,psycopg2
+import sqlite3,psycopg2
+import MySQLdb
 import numpy as np
 import cx_Oracle
 import os
+import json
+
 os.environ['NLS_LANG'] = 'SIMPLIFIED CHINESE_CHINA.UTF8'
 
-#class dbobj()
+def siplitlist(listx,n,axis = 0):
+    '''
+    listx: 待分组序列，类型可以是list，np.array,pd.Series...
+    n: 若axis=0 n为组别个数,计算生成元素个数,若axis=1 n为每组元素个数,计算生成组别个数
+    axis: 若axis=0 按照固定组别个数分组, 若axis=1 按照固定元素个数分组
+    '''
+    if axis ==0:
+        a1,a2 = divmod(len(listx),n)
+        N = [a1]*(n-a2)+[a1+1]*a2 if a1!=0 else [1]*len(listx)
+        res = [listx[s:s+i] for s,i in enumerate(N) if len(listx[s:s+i])!=0]
+    else:
+        N = int(len(listx)/n)+1
+        res = [listx[i*n:(i+1)*n] for i in range(N) if len(listx[i*n:(i+1)*n])!=0]
+    return res
 
 class oracle_obj():
     actions = {"add":"ADD ","del":"drop column ","update":" modify  "}
@@ -40,7 +56,7 @@ class oracle_obj():
         df1 = df.apply(lambda x:sql%(tablename,','.join(columns),\
                                      str(tuple(x.values.tolist()))),axis=1)
         sql1 = 'insert all '+ ' \n '.join(df1.values)+"\nselect 1 from dual "
-        return sql1
+        return [sql1]
         
 
 class postgre_obj():
@@ -77,7 +93,7 @@ class postgre_obj():
         col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
         col1 = ','.join(df.apply(self.colcom,axis = 1))
         sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
-        return sql
+        return [sql]
         
         
 class mysql_obj():
@@ -110,7 +126,7 @@ class mysql_obj():
         col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
         col1 = ','.join(df.apply(self.colcom,axis = 1))
         sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
-        return sql
+        return [sql]
     
         
 class sqlite_obj():
@@ -123,6 +139,7 @@ class sqlite_obj():
             if '.db' not in dbname and '.sqlite' not in dbname:
                 dbname = dbname+'.db'
             self.conn = sqlite3.connect(dbname)
+        self.conn.text_factory = str
             
     def list_table(self):
         sql = "SELECT name FROM sqlite_master WHERE type='table' order by name"
@@ -141,16 +158,20 @@ class sqlite_obj():
     def colcom(self,g):
         return ' UNION ALL SELECT '+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))
          
-    def insert_df(self,tablename, df,columns):
-        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))
-        col1 = ''.join(df.apply(self.colcom,axis = 1))
-        col1 = col1.replace("UNION ALL SELECT",'SELECT',1)
-        sql = "INSERT INTO %s (%s) %s;" % (tablename,col,col1)
-        return sql
+    def insert_df(self,tablename, rdf,columns):
+        dfs = siplitlist(rdf,500,axis=1)
+        sqls = []
+        for df in dfs:
+            col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))
+            col1 = ''.join(df.apply(self.colcom,axis = 1))
+            col1 = col1.replace("UNION ALL SELECT",'SELECT',1)
+            sql = "insert INTO %s (%s) %s;" % (tablename,col,col1)
+            sqls.append(sql)
+        return sqls
         
-
-class Mysql_obj():
-    def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+class Mysql():
+    def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1',\
+        warning =True):
         u'''
         初始化Mysql类, 支持 Mysql，Postgresql 和Sqlite3 引擎
         engine :数据库引擎
@@ -165,6 +186,7 @@ class Mysql_obj():
         password :密码
         host :数据库地址  
         '''
+        self._warning = warning
         self.perkey ={}
         engins = {"m":"m","mysql":"m","postgresql":"p","postgre":"p","p":"p","sqlite":'s',"s":"s",'o':"o",'oracle':"o"}
         objs = {"o": oracle_obj,"p":postgre_obj,"m":mysql_obj,"s":sqlite_obj}
@@ -183,7 +205,8 @@ class Mysql_obj():
         try:
             self.cur.execute(sql)
             self.obj.conn.commit()
-            print (msg)
+            if self._warning:
+                print (msg)
         except Exception as e:
             print (error,e)
             print ("Error : ",sql)
@@ -206,6 +229,17 @@ class Mysql_obj():
         self.execute(sql,u'获取数据表成功',u'获取数据表失败: ')
         rows = [i[0] for i in self.cur.fetchall()]
         return rows     
+
+    def creat_table_from_df(self,tablename,df):
+    	dtypes = {"object":"text","int32":"integer","int64":"integer",\
+    			"float64":"FLOAT","datetime64[ns]":"timestamp"}
+    	timetype = {"p":{},\
+    				"s":{"float64":"REAL"},\
+    				"m":{},\
+    				"o":{"object":"VARCHAR2"}}
+    	dtypes.update(timetype[self.enginetype])
+    	cols = df.dtypes.astype(str).map(dtypes).to_dict()
+    	self.creat_table(tablename,cols)
 
     def creat_table(self,tablename,col,perkey = None,default = {}):
         u'''
@@ -303,10 +337,12 @@ class Mysql_obj():
         elif type(df) == type(pd.DataFrame()):
             columns = df.columns.tolist()
 
-            if bz:
-                ## sqlite 批量插入只支持一次 500条数据
-                sql = self.obj.insert_df(tablename,df,columns)
-                self.execute(sql,u'插入数据表成功 %d行 ' % (len(df)),u'插入数据失败: ')
+        if bz:
+            ## sqlite 批量插入只支持一次 500条数据
+            sqls = self.obj.insert_df(tablename,df,columns)
+            for sql in sqls:
+            	self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
+            print (u'插入数据表成功 %s行'%( len(df)))
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
         u'''
@@ -340,7 +376,14 @@ class Mysql_obj():
         columns = self.show_schema(tablename)['Field']
         df = pd.DataFrame(list(rows),columns = columns) ##  pd.read_sql_query(sql,self.obj.conn)
         return df
-            
+    
+    def delete_data(self,tablename,condition):
+        conditions = ' and '.join(map(lambda j:"%s=%s"%(j[0],j[1]),\
+            zip(condition.keys(),map(lambda x:json.dumps(x).replace('"',"'"),\
+            condition.values()))))
+        sql = 'delete FROM %s WHERE %s' % (tablename,conditions)
+        self.execute(sql,u'数据删除成功',u'数据删除失败: ')
+
     def update_data(self,tablename,data,condition):
         u'''
         更新数据
