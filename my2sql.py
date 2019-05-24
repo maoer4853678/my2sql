@@ -1,7 +1,7 @@
 #coding=utf-8
 import pandas as pd
 import sqlite3,psycopg2
-import MySQLdb
+# import MySQLdb
 import numpy as np
 import cx_Oracle
 import os
@@ -27,7 +27,7 @@ def siplitlist(listx,n,axis = 0):
 class oracle_obj():
     actions = {"add":"ADD ","del":"drop column ","update":" modify  "}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port=None):
         self.conn=cx_Oracle.connect('%s/%s@%s/%s'%(user,password,host,dbname))
         
     def list_table(self):
@@ -51,19 +51,23 @@ class oracle_obj():
     def colcom(self,g):
         return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"   
       
-    def insert_df(self,tablename, df,columns):
-        sql = '''into %s (%s) values %s '''
-        df1 = df.apply(lambda x:sql%(tablename,','.join(columns),\
-                                     str(tuple(x.values.tolist()))),axis=1)
-        sql1 = 'insert all '+ ' \n '.join(df1.values)+"\nselect 1 from dual "
-        return [sql1]
+    def insert_df(self,tablename, rdf,columns):
+        dfs = siplitlist(rdf,80000,axis=1)
+        sqls = []
+        for df in dfs:
+            sql = '''into %s (%s) values %s '''
+            df1 = df.apply(lambda x:sql%(tablename,','.join(columns),\
+                                         str(tuple(x.values.tolist()))),axis=1)
+            sql1 = 'insert all '+ ' \n '.join(df1.values)+"\nselect 1 from dual "
+            sqls.append(sql1)
+        return sqls
         
 
 class postgre_obj():
     actions = {"add":"ADD ","del":"DROP COLUMN ","update":" ALTER "}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
-        self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname)
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= 5432):
+        self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname,port=port)
     
     def list_table(self):
         sql = "select tablename from pg_tables where schemaname='public'"
@@ -89,17 +93,20 @@ class postgre_obj():
     def colcom(self,g):
         return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"   
    
-    def insert_df(self,tablename, df,columns):
-        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
-        col1 = ','.join(df.apply(self.colcom,axis = 1))
-        sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
-        return [sql]
-        
+    def insert_df(self,tablename, rdf,columns):
+        dfs = siplitlist(rdf,80000,axis=1)
+        sqls = []
+        for df in dfs:
+            col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
+            col1 = ','.join(df.apply(self.colcom,axis = 1))
+            sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
+            sqls.append(sql)
+        return sqls
         
 class mysql_obj():
     actions = {"add":"ADD ","del":"DROP COLUMN ","update":' modify column'}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None):
         self.conn = MySQLdb.connect(host,user,password,dbname)
 
     def list_table(self):
@@ -122,17 +129,21 @@ class mysql_obj():
     def colcom(self,g):
         return "("+','.join(["'%s'" for i in range(len(g.index))]) % (tuple(g.tolist()))+")"    
     
-    def insert_df(self,tablename, df,columns):
-        col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
-        col1 = ','.join(df.apply(self.colcom,axis = 1))
-        sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
-        return [sql]
+    def insert_df(self,tablename, rdf,columns):
+        dfs = siplitlist(rdf,80000,axis=1)
+        sqls = []
+        for df in dfs:
+            col = ','.join(["%s" for i in range(len(columns))]) % (tuple(columns))      
+            col1 = ','.join(df.apply(self.colcom,axis = 1))
+            sql = "INSERT INTO %s (%s) values %s;" % (tablename,col,col1)
+            sqls.append(sql)
+        return sqls
     
         
 class sqlite_obj():
     actions = {"add":"ADD "}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1'):
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None):
         if dbname=='memory' or dbname=='':
             self.conn = sqlite3.connect(':memory:')
         else:
@@ -170,7 +181,7 @@ class sqlite_obj():
         return sqls
         
 class Mysql():
-    def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1',\
+    def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1',port = 5432,\
         warning =True):
         u'''
         初始化Mysql类, 支持 Mysql，Postgresql 和Sqlite3 引擎
@@ -192,7 +203,7 @@ class Mysql():
         objs = {"o": oracle_obj,"p":postgre_obj,"m":mysql_obj,"s":sqlite_obj}
         if engine.lower() in engins:
             self.enginetype = engins[engine.lower()]
-            self.obj = objs[self.enginetype](dbname,user,password,host)
+            self.obj = objs[self.enginetype](dbname,user,password,host,port)
             self.cur = self.obj.conn.cursor()
             try:
                 self.conn.set_client_encoding('UTF8')
@@ -207,10 +218,12 @@ class Mysql():
             self.obj.conn.commit()
             if self._warning:
                 print (msg)
+            return True,msg
         except Exception as e:
-            print (error,e)
+            print (e)
             print ("Error : ",sql)
             self.obj.conn.rollback()
+            return False,e
     
     def exec_(self,sql):
         u'''
@@ -341,7 +354,7 @@ class Mysql():
             ## sqlite 批量插入只支持一次 500条数据
             sqls = self.obj.insert_df(tablename,df,columns)
             for sql in sqls:
-            	self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
+                self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
             print (u'插入数据表成功 %s行'%( len(df)))
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
@@ -457,7 +470,3 @@ class Mysql():
     def close(self):
         u'''关闭数据库'''
         self.obj.conn.close()
-        
-        
-        
-        
