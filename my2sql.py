@@ -268,6 +268,7 @@ class Mysql():
         '''
         if tablename in self.list_table():
             print (u'数据表创建失败: %s已存在'%(tablename))
+            return False,''
         else:
             if perkey!= None:
                 if type(perkey)==type([]):
@@ -281,7 +282,7 @@ class Mysql():
                    
             sql = ','.join(map(lambda i:"%s %s"%(i[0],i[1]),col.items()))
             sql = '''CREATE TABLE %s (%s%s) ''' % (tablename,sql,Psql)
-            self.execute(sql,u'数据表创建成功',u'数据表创建失败: ')
+            return self.execute(sql,u'数据表创建成功',u'数据表创建失败: ')
 
     def delete_table(self,tablename,kind=0):
         u'''
@@ -293,7 +294,7 @@ class Mysql():
         '''
         k = 'DROP' if kind==0 else "truncate"
         sql = '%s TABLE %s ' % (k,tablename)
-        self.execute(sql,u'删除表成功',u'删除表创建失败: ')
+        return self.execute(sql,u'删除表成功',u'删除表创建失败: ')
             
     def show_schema(self,tablename):
         u'''
@@ -319,9 +320,10 @@ class Mysql():
         '''
         if action in self.obj.actions:
             sql = self.obj.alter_table(tablename,action,col)
-            self.execute(sql,u'修改表结构成功',u'修改表结构失败: ')     
+            return self.execute(sql,u'修改表结构成功',u'修改表结构失败: ')     
         else:
-           print (u'修改表结构失败: 执行动作不存在')
+            print (u'修改表结构失败: 执行动作不存在')
+            return False,''
            
     def insert_df(self,tablename,df):
         u'''
@@ -353,9 +355,15 @@ class Mysql():
         if bz:
             ## sqlite 批量插入只支持一次 500条数据
             sqls = self.obj.insert_df(tablename,df,columns)
+            res = []
             for sql in sqls:
-                self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
-            print (u'插入数据表成功 %s行'%( len(df)))
+                bz,_= self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
+                res.append(bz)
+            if min(bz)==True:
+            	print (u'插入数据表成功 %s行'%( len(df)))
+            	return True,_
+            else:
+            	return False,''
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
         u'''
@@ -395,7 +403,7 @@ class Mysql():
             zip(condition.keys(),map(lambda x:json.dumps(x).replace('"',"'"),\
             condition.values()))))
         sql = 'delete FROM %s WHERE %s' % (tablename,conditions)
-        self.execute(sql,u'数据删除成功',u'数据删除失败: ')
+        return self.execute(sql,u'数据删除成功',u'数据删除失败: ')
 
     def update_data(self,tablename,data,condition):
         u'''
@@ -429,7 +437,7 @@ class Mysql():
         [tmp.extend(i) for i in data.items()]
         [tmp.extend(i) for i in condition.items()]
         sql = sql % tuple(tmp)
-        self.execute(sql,u'更新数据成功',u'更新数据失败: ')
+        return self.execute(sql,u'更新数据成功',u'更新数据失败: ')
             
     def creat_key(self,tablename,perkey=[],foreign ={}):
         u'''
