@@ -1,13 +1,17 @@
 #coding=utf-8
 import pandas as pd
 import sqlite3,psycopg2
-# import MySQLdb
+import MySQLdb
 import numpy as np
 import cx_Oracle
 import os
 import json
+# import sys
+# from imp import reload
 
 os.environ['NLS_LANG'] = 'SIMPLIFIED CHINESE_CHINA.UTF8'
+# reload(sys)
+# sys.setdefaultencoding('utf-8')
 
 def siplitlist(listx,n,axis = 0):
     '''
@@ -25,9 +29,10 @@ def siplitlist(listx,n,axis = 0):
     return res
 
 class oracle_obj():
-    actions = {"add":"ADD ","del":"drop column ","update":" modify  "}
+    actions = {"add":"ADD ","del":"drop column ","update":" modify  " ,"rename":"rename " ,\
+               'add_perkey' : 'add constraint' ,'del_perkey' : 'DROP CONSTRAINT'}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port=None):
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port=None,**args):
         self.conn=cx_Oracle.connect('%s/%s@%s/%s'%(user,password,host,dbname))
         
     def list_table(self):
@@ -43,6 +48,17 @@ class oracle_obj():
         sql ='alter table %s ' %tablename.upper()
         if action=="del":
             sql += ','.join(map(lambda i:"%s %s "%(self.actions[action],i),col.keys()))
+        elif action=="rename":
+            sql += ','.join(map(lambda i:"%s %s to %s"%(self.actions[action],i[0],i[1]),col.items()))
+        elif action=="add_perkey":
+            temp = list(col.items())[0]
+            if type(temp[1]) == type([]) or type(temp[1]) == type(()):
+                primary = ','.join(temp[1])
+            else:
+                primary = temp[1]
+            sql += "%s %s primary key(%s)"%(self.actions[action],temp[0],primary)
+        elif action=="del_perkey":
+            sql += "%s %s"%(self.actions[action],list(col.items())[0][0])
         else:
             for i in col.items():
                 sql +=" %s %s %s"%(self.actions[action],i[0],i[1])
@@ -64,10 +80,11 @@ class oracle_obj():
         
 
 class postgre_obj():
-    actions = {"add":"ADD ","del":"DROP COLUMN ","update":" ALTER "}
+    actions = {"add":"ADD ","del":"DROP COLUMN ","update":" ALTER " , "rename":"rename ",\
+               'add_perkey' : 'add primary key' ,'del_perkey' : 'drop constraint'}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= 5432):
-        self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname,port=port)
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= 5432,**args):
+        self.conn =psycopg2.connect( user=user, password=password, host=host,database =dbname,port=port,**args)
     
     def list_table(self):
         sql = "select tablename from pg_tables where schemaname='public'"
@@ -88,6 +105,17 @@ class postgre_obj():
             sql += ','.join(map(lambda i:"%s %s %s"%(self.actions[action],i[0],i[1]),col.items()))
         if action=="update":
             sql += ','.join(map(lambda i:"%s %s type %s using %s::%s"%(self.actions[action],i[0],i[1],i[0],i[1]),col.items()))
+        if action=="rename":
+            sql += ','.join(map(lambda i:"%s %s to %s"%(self.actions[action],i[0],i[1]),col.items()))
+        if action=="add_perkey":
+            temp = list(col.items())[0]
+            if type(temp[1]) == type([]) or type(temp[1]) == type(()):
+                primary = ','.join(temp[1])
+            else:
+                primary = temp[1]
+            sql += "%s (%s) "%(self.actions[action],primary)
+        if action=="del_perkey":
+            sql += "%s %s_pkey"%(self.actions[action],tablename)
         return sql
         
     def colcom(self,g):
@@ -104,10 +132,11 @@ class postgre_obj():
         return sqls
         
 class mysql_obj():
-    actions = {"add":"ADD ","del":"DROP COLUMN ","update":' modify column'}
+    actions = {"add":"ADD ","del":"DROP COLUMN ","update":' modify column' , "rename":"change ",\
+               'add_perkey' : 'add primary key' ,'del_perkey' : 'drop PRIMARY KEY'}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None):
-        self.conn = MySQLdb.connect(host,user,password,dbname)
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None,**args):
+        self.conn = MySQLdb.connect(host,user,password,dbname,**args)
 
     def list_table(self):
         sql = "show tables"
@@ -122,6 +151,17 @@ class mysql_obj():
         sql = 'alter table %s ' %tablename
         if action=="del":
             sql += ','.join(map(lambda i:"%s %s "%(self.actions[action],i),col.keys()))
+        elif action=="rename":
+            sql += ','.join(map(lambda i:"%s %s %s %%s"%(self.actions[action],i[0],i[1]),col.items()))   
+        elif action=="add_perkey":
+            temp = list(col.items())[0]
+            if type(temp[1]) == type([]) or type(temp[1]) == type(()):
+                primary = ','.join(temp[1])
+            else:
+                primary = temp[1]
+            sql += "%s (%s) "%(self.actions[action],primary)
+        elif action=="del_perkey":
+            sql += "%s "%(self.actions[action])
         else:
             sql += ','.join(map(lambda i:"%s %s %s"%(self.actions[action],i[0],i[1]),col.items()))
         return sql
@@ -143,7 +183,7 @@ class mysql_obj():
 class sqlite_obj():
     actions = {"add":"ADD "}
     
-    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None):
+    def __init__(self,dbname ='dbname',user='root', password='root', host='127.0.0.1',port= None,**args):
         if dbname=='memory' or dbname=='':
             self.conn = sqlite3.connect(':memory:')
         else:
@@ -182,7 +222,7 @@ class sqlite_obj():
         
 class Mysql():
     def __init__(self,engine,dbname ='dbname',user='root', password='root', host='127.0.0.1',port = 5432,\
-        warning =True):
+        warning =True, **args):
         u'''
         初始化Mysql类, 支持 Mysql，Postgresql 和Sqlite3 引擎
         engine :数据库引擎
@@ -203,7 +243,7 @@ class Mysql():
         objs = {"o": oracle_obj,"p":postgre_obj,"m":mysql_obj,"s":sqlite_obj}
         if engine.lower() in engins:
             self.enginetype = engins[engine.lower()]
-            self.obj = objs[self.enginetype](dbname,user,password,host,port)
+            self.obj = objs[self.enginetype](dbname,user,password,host,port,**args)
             self.cur = self.obj.conn.cursor()
             try:
                 self.conn.set_client_encoding('UTF8')
@@ -231,7 +271,10 @@ class Mysql():
         sql : sql语句 [字符串]
         '''
         self.execute(sql,u'SQL语句执行成功',u'SQL语句执行失败: ')
-        rows = self.cur.fetchall()
+        try:
+            rows = self.cur.fetchall()
+        except:
+            pass
         return rows  
 
     def list_table(self):
@@ -243,16 +286,16 @@ class Mysql():
         rows = [i[0] for i in self.cur.fetchall()]
         return rows     
 
-    def creat_table_from_df(self,tablename,df):
-    	dtypes = {"object":"text","int32":"integer","int64":"integer",\
-    			"float64":"FLOAT","datetime64[ns]":"timestamp"}
-    	timetype = {"p":{},\
-    				"s":{"float64":"REAL"},\
-    				"m":{},\
-    				"o":{"object":"VARCHAR2"}}
-    	dtypes.update(timetype[self.enginetype])
-    	cols = df.dtypes.astype(str).map(dtypes).to_dict()
-    	self.creat_table(tablename,cols)
+    def creat_table_from_df(self,tablename,df,perkey =None):
+        dtypes = {"object":"text","int32":"integer","int64":"integer",\
+                "float64":"FLOAT","datetime64[ns]":"timestamp"}
+        timetype = {"p":{},\
+                    "s":{"float64":"REAL"},\
+                    "m":{},\
+                    "o":{"object":"VARCHAR2"}}
+        dtypes.update(timetype[self.enginetype])
+        cols = df.dtypes.astype(str).map(dtypes).to_dict()
+        self.creat_table(tablename,cols,perkey = perkey)
 
     def creat_table(self,tablename,col,perkey = None,default = {}):
         u'''
@@ -268,10 +311,9 @@ class Mysql():
         '''
         if tablename in self.list_table():
             print (u'数据表创建失败: %s已存在'%(tablename))
-            return False,''
         else:
             if perkey!= None:
-                if type(perkey)==type([]):
+                if type(perkey)==type([]) or type(perkey)==type(()):
                     perkey = ','.join(perkey)
                 Psql = ',PRIMARY KEY (%s)' % (perkey)
             else:
@@ -282,7 +324,7 @@ class Mysql():
                    
             sql = ','.join(map(lambda i:"%s %s"%(i[0],i[1]),col.items()))
             sql = '''CREATE TABLE %s (%s%s) ''' % (tablename,sql,Psql)
-            return self.execute(sql,u'数据表创建成功',u'数据表创建失败: ')
+            self.execute(sql,u'数据表创建成功',u'数据表创建失败: ')
 
     def delete_table(self,tablename,kind=0):
         u'''
@@ -294,7 +336,7 @@ class Mysql():
         '''
         k = 'DROP' if kind==0 else "truncate"
         sql = '%s TABLE %s ' % (k,tablename)
-        return self.execute(sql,u'删除表成功',u'删除表创建失败: ')
+        self.execute(sql,u'删除表成功',u'删除表创建失败: ')
             
     def show_schema(self,tablename):
         u'''
@@ -316,14 +358,21 @@ class Mysql():
             add : 为表增加新字段
             del : 为表删除字段
             update : 为表修改字段类型
+            rename : 修改表字段名称  col = {"旧名称":"新名称"}
+            add_perkey : 为表增加主键 col = {"主键名称" : [主键字段列表]}
+            del_perkey : 为表删除主键 col = {"主键名称" : '' }
         col : 字段配置表 [字典]  key为字段名称，value是 类型 ，若action为del ，value可为空
         '''
         if action in self.obj.actions:
             sql = self.obj.alter_table(tablename,action,col)
-            return self.execute(sql,u'修改表结构成功',u'修改表结构失败: ')     
+            if self.enginetype=='m' and action =='rename':
+                schema = self.show_schema(tablename)
+                schema1 =  schema[schema.Field.isin(col.keys())]
+                sql = sql%(tuple(schema1['Type'].tolist()))
+                print ("Debug" , sql)
+            self.execute(sql,u'修改表结构成功',u'修改表结构失败: ')     
         else:
-            print (u'修改表结构失败: 执行动作不存在')
-            return False,''
+           print (u'修改表结构失败: 执行动作不存在')
            
     def insert_df(self,tablename,df):
         u'''
@@ -355,15 +404,9 @@ class Mysql():
         if bz:
             ## sqlite 批量插入只支持一次 500条数据
             sqls = self.obj.insert_df(tablename,df,columns)
-            res = []
             for sql in sqls:
-                bz,_= self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
-                res.append(bz)
-            if min(bz)==True:
-            	print (u'插入数据表成功 %s行'%( len(df)))
-            	return True,_
-            else:
-            	return False,''
+                self.execute(sql,u'插入数据表成功',u'插入数据失败: ')
+            print (u'插入数据表成功 %s行'%( len(df)))
             
     def show_df(self,tablename,columns = "*",condition = '',count=-1):
         u'''
@@ -403,7 +446,7 @@ class Mysql():
             zip(condition.keys(),map(lambda x:json.dumps(x).replace('"',"'"),\
             condition.values()))))
         sql = 'delete FROM %s WHERE %s' % (tablename,conditions)
-        return self.execute(sql,u'数据删除成功',u'数据删除失败: ')
+        self.execute(sql,u'数据删除成功',u'数据删除失败: ')
 
     def update_data(self,tablename,data,condition):
         u'''
@@ -418,7 +461,7 @@ class Mysql():
         chemainit = dict(zip(chemainit['Field'],chemainit['Type']))
         col = []
         for i in range(len(data.keys())):
-            if "int" in chemainit[data.items()[i][0]].lower() or 'double' in chemainit[data.items()[i][0]].lower():
+            if "int" in chemainit[list(data.items())[i][0]].lower() or 'double' in chemainit[list(data.items())[i][0]].lower():
                 tmp = "%s = %s"
             else:
                 tmp = "%s = '%s'"
@@ -426,7 +469,7 @@ class Mysql():
         col = ' , '.join(col)
         col1 = []
         for i in range(len(condition.keys())):
-            if 'int' in chemainit[condition.items()[i][0]].lower() or 'double' in chemainit[condition.items()[i][0]].lower():
+            if 'int' in chemainit[list(condition.items())[i][0]].lower() or 'double' in chemainit[list(condition.items())[i][0]].lower():
                 tmp = "%s = %s"
             else:
                 tmp = "%s = '%s'"
@@ -437,7 +480,7 @@ class Mysql():
         [tmp.extend(i) for i in data.items()]
         [tmp.extend(i) for i in condition.items()]
         sql = sql % tuple(tmp)
-        return self.execute(sql,u'更新数据成功',u'更新数据失败: ')
+        self.execute(sql,u'更新数据成功',u'更新数据失败: ')
             
     def creat_key(self,tablename,perkey=[],foreign ={}):
         u'''
@@ -477,4 +520,5 @@ class Mysql():
         
     def close(self):
         u'''关闭数据库'''
+        self.cur.close()
         self.obj.conn.close()
