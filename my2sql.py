@@ -22,7 +22,13 @@ def siplitlist(listx,n,axis = 0):
     if axis ==0:
         a1,a2 = divmod(len(listx),n)
         N = [a1]*(n-a2)+[a1+1]*a2 if a1!=0 else [1]*len(listx)
-        res = [listx[s:s+i] for s,i in enumerate(N) if len(listx[s:s+i])!=0]
+        res = []
+        n_=0
+        for i in N:
+            t = listx[n_:n_+i]
+            if len(t):
+                res.append(t)
+            n_+=i
     else:
         N = int(len(listx)/n)+1
         res = [listx[i*n:(i+1)*n] for i in range(N) if len(listx[i*n:(i+1)*n])!=0]
