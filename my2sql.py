@@ -1,9 +1,9 @@
 #coding=utf-8
 import pandas as pd
 import sqlite3,psycopg2
-import MySQLdb
+# import MySQLdb
 import numpy as np
-import cx_Oracle
+# import cx_Oracle
 import os
 import json
 # import sys
@@ -444,7 +444,8 @@ class Mysql():
         self.execute(sql,u'获取数据成功',u'获取数据失败: ')
         rows = self.cur.fetchall()
         columns = self.show_schema(tablename)['Field']
-        df = pd.DataFrame(list(rows),columns = columns) ##  pd.read_sql_query(sql,self.obj.conn)
+#        df = pd.DataFrame(list(rows),columns = columns) ## 
+        df =  pd.read_sql_query(sql,self.obj.conn)
         return df
     
     def delete_data(self,tablename,condition):
